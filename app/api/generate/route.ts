@@ -54,17 +54,32 @@ function saveSample(htmlCode: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const { prompt, existingCode, isEdit } = await req.json();
 
     if (!prompt) return NextResponse.json({ error: 'Prompt required' }, { status: 400 });
 
     const systemPrompt = getSystemPrompt();
+    
+    let messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    if (isEdit && existingCode) {
+      // EDIT MODE: Provide context about editing existing code
+      messages.push({
+        role: 'user',
+        content: `Here is an existing app code:\n\n${existingCode}\n\nUser wants to edit it with this request: ${prompt}\n\nPlease update the existing code to incorporate the requested changes. Make sure to preserve all existing functionality unless the user explicitly asks to change or remove it.`,
+      });
+    } else {
+      // CREATE MODE: Normal generation
+      messages.push({
+        role: 'user',
+        content: prompt,
+      });
+    }
 
     const completion = await openai.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
+      messages: messages,
       model: 'gpt-4o', // Switch to 'gpt-4o' for better results if you have budget
       temperature: 0.7, // Creative enough to infer features
     });

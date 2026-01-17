@@ -1,10 +1,40 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { getAllApps, deleteApp } from '@/lib/appStorage';
+import type { AppData } from '@/lib/appStorage';
 
 export default function Home() {
-  // Placeholder for apps - will be populated later
-  const apps: Array<{ id: string; name: string; description: string; createdAt: string }> = [];
+  const router = useRouter();
+  const [apps, setApps] = useState<AppData[]>([]);
+
+  useEffect(() => {
+    const loadedApps = getAllApps();
+    setApps(loadedApps);
+  }, []);
+
+  const handleOpenApp = (id: string) => {
+    router.push(`/app/${id}`);
+  };
+
+  const handleDeleteApp = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Are you sure you want to delete this app?')) {
+      deleteApp(id);
+      setApps(getAllApps());
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+    });
+  };
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -68,16 +98,22 @@ export default function Home() {
                     <h3 className="text-lg font-semibold text-gray-900">{app.name}</h3>
                     <p className="mt-2 text-sm text-gray-600">{app.description}</p>
                     <p className="mt-4 text-xs text-gray-400">
-                      Created {app.createdAt}
+                      Created {formatDate(app.createdAt)}
                     </p>
                   </div>
                 </div>
                 <div className="mt-4 flex gap-2">
-                  <button className="flex-1 rounded-md bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">
+                  <button 
+                    onClick={() => handleOpenApp(app.id)}
+                    className="flex-1 rounded-md bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                  >
                     Open
                   </button>
-                  <button className="rounded-md bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                    ...
+                  <button 
+                    onClick={(e) => handleDeleteApp(app.id, e)}
+                    className="rounded-md bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  >
+                    Delete
                   </button>
                 </div>
               </div>
