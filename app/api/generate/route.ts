@@ -78,22 +78,54 @@ export async function POST(req: Request) {
       });
     }
 
-    const completion = await openai.chat.completions.create({
+    const stream = await openai.chat.completions.create({
       messages: messages,
       model: 'gpt-4o', // Switch to 'gpt-4o' for better results if you have budget
       temperature: 0.7, // Creative enough to infer features
+      stream: true,
     });
 
-    let htmlCode = completion.choices[0].message.content || '';
+    // Create a ReadableStream to send chunks to the client
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          let fullContent = '';
+          
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+              fullContent += content;
+              // Send each chunk to the client
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content, done: false })}\n\n`));
+            }
+          }
 
-    // CLEANUP: Remove markdown backticks if the AI adds them
-    htmlCode = htmlCode.replace(/```html/g, '').replace(/```/g, '');
+          // CLEANUP: Remove markdown backticks if the AI adds them
+          let htmlCode = fullContent.replace(/```html/g, '').replace(/```/g, '');
 
-    // Save the generated HTML to a file
-    const fileName = saveSample(htmlCode);
-    console.log(`Saved generated app to: sample/${fileName}`);
+          // Save the generated HTML to a file
+          const fileName = saveSample(htmlCode);
+          console.log(`Saved generated app to: sample/${fileName}`);
 
-    return NextResponse.json({ code: htmlCode, fileName });
+          // Send final message with complete code
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: '', done: true, code: htmlCode, fileName })}\n\n`));
+          controller.close();
+        } catch (streamError) {
+          console.error('Streaming error:', streamError);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Failed to generate app', done: true })}\n\n`));
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
   } catch (error) {
     console.error('OpenAI Error:', error);
     return NextResponse.json({ error: 'Failed to generate app' }, { status: 500 });

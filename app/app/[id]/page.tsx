@@ -44,29 +44,33 @@ export default function AppViewer() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-            >
-              ← Back to Dashboard
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{app.name}</h1>
-              <p className="mt-1 text-sm text-gray-600">{app.description}</p>
-            </div>
-          </div>
-        </div>
+    <main className="min-h-screen bg-white">
+      {/* Back Button - Top Left */}
+      <div className="fixed top-4 left-4 z-50">
+        <Link
+          href="/"
+          className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-md hover:bg-gray-50 transition-colors text-blue-600 hover:text-blue-700"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </Link>
+      </div>
 
-        {/* App Preview */}
-        <div className="flex items-center justify-center bg-gray-200 p-4 md:p-8">
-          <div className="relative h-[800px] w-full max-w-[400px]">
-            <AppSandbox htmlCode={app.code} />
-          </div>
+      {/* App Preview - Fullscreen on mobile, centered on desktop */}
+      <div className="md:flex md:items-center md:justify-center md:bg-gray-200 md:p-4 lg:p-8">
+        <div className="fixed inset-0 md:relative md:h-[800px] md:w-full md:max-w-[400px]">
+          <AppSandbox htmlCode={app.code} fullscreen={true} />
         </div>
       </div>
     </main>

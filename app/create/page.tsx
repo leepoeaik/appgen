@@ -20,7 +20,10 @@ export default function CreateApp() {
   const [isEditingMode, setIsEditingMode] = useState(false);
   const [appId, setAppId] = useState<string | null>(null);
   const [originalCreatedAt, setOriginalCreatedAt] = useState<string | null>(null);
+  const [preservedImageUrl, setPreservedImageUrl] = useState<string | undefined>(undefined);
   const [isLoadingExistingApp, setIsLoadingExistingApp] = useState(false);
+  const [savedCode, setSavedCode] = useState<string>(''); // Track saved code to detect changes
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   // Load existing app if editing
   useEffect(() => {
@@ -30,8 +33,10 @@ export default function CreateApp() {
       if (existingApp) {
         setAppId(existingApp.id);
         setGeneratedCode(existingApp.code);
+        setSavedCode(existingApp.code); // Store saved version
         setInitialPrompt(existingApp.initialPrompt);
         setOriginalCreatedAt(existingApp.createdAt);
+        setPreservedImageUrl(existingApp.imageUrl); // Preserve image URL
         setIsEditingMode(true); // Start in editing mode
       } else {
         // App not found, redirect to home
@@ -41,9 +46,57 @@ export default function CreateApp() {
     }
   }, [editAppId, router]);
 
+  // Check for unsaved changes
+  // For new apps: if generatedCode exists but savedCode is empty, it's unsaved
+  // For existing apps: if generatedCode differs from savedCode, it's unsaved
+  const hasUnsavedChanges = isEditingMode && (
+    (savedCode === '' && generatedCode !== '') || // New app with generated code
+    (savedCode !== '' && generatedCode !== savedCode) // Existing app with changes
+  );
+
+  // Handle browser back button and navigation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges]);
+
+  // Handle back navigation with confirmation
+  const handleBackClick = (e: React.MouseEvent) => {
+    if (hasUnsavedChanges) {
+      e.preventDefault();
+      setShowConfirmDialog(true);
+    }
+  };
+
+  // Handle confirmation dialog actions
+  const handleConfirmLeave = () => {
+    setShowConfirmDialog(false);
+    router.push('/');
+  };
+
+  const handleCancelLeave = () => {
+    setShowConfirmDialog(false);
+  };
+
   const handleGenerate = async () => {
     if (!prompt) return;
     setLoading(true);
+    setGeneratedCode(''); // Clear previous code
+    setSavedCode(''); // Clear saved code for new app
+    setInitialPrompt(prompt);
+    const newId = generateAppId();
+    setAppId(newId);
 
     try {
       const res = await fetch('/api/generate', {
@@ -52,18 +105,82 @@ export default function CreateApp() {
         body: JSON.stringify({ prompt }),
       });
 
-      const data = await res.json();
-      if (data.code) {
-        setGeneratedCode(data.code);
-        setInitialPrompt(prompt);
-        setIsEditingMode(true);
-        setPrompt(''); // Clear initial prompt after generation
-        const newId = generateAppId();
-        setAppId(newId);
+      if (!res.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.chunk !== undefined) {
+                // Accumulate chunks
+                setGeneratedCode(prev => {
+                  const newCode = prev + data.chunk;
+                  return newCode;
+                });
+              }
+              if (data.done) {
+                // Final code is set, save and navigate to edit page
+                if (data.error) {
+                  alert(data.error || 'Something went wrong generating the app.');
+                  setLoading(false);
+                } else if (data.code) {
+                  const finalCode = data.code;
+                  setGeneratedCode(finalCode);
+                  
+                  // Auto-save the generated app
+                  const appName = extractAppNameFromPrompt(prompt);
+                  const appDescription = prompt.length > 100 
+                    ? prompt.substring(0, 100) + '...' 
+                    : prompt;
+
+                  const appData: AppData = {
+                    id: newId,
+                    name: appName,
+                    description: appDescription,
+                    code: finalCode,
+                    initialPrompt: prompt,
+                    createdAt: new Date().toISOString(),
+                    lastModified: new Date().toISOString(),
+                  };
+
+                  try {
+                    saveApp(appData);
+                    setSavedCode(finalCode); // Mark as saved
+                    setLoading(false);
+                    // Navigate to edit page with the app ID to show preview
+                    router.push(`/create?id=${newId}`);
+                  } catch (error) {
+                    console.error('Save error:', error);
+                    alert('Failed to save app. Please try again.');
+                    setLoading(false);
+                  }
+                } else {
+                  setLoading(false);
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing SSE data:', e);
+            }
+          }
+        }
       }
     } catch (error) {
+      console.error('Generation error:', error);
       alert('Something went wrong generating the app.');
-    } finally {
       setLoading(false);
     }
   };
@@ -71,6 +188,7 @@ export default function CreateApp() {
   const handleEdit = async () => {
     if (!editPrompt || !generatedCode) return;
     setLoading(true);
+    const previousCode = generatedCode; // Keep previous code as fallback
 
     try {
       const res = await fetch('/api/generate', {
@@ -83,14 +201,57 @@ export default function CreateApp() {
         }),
       });
 
-      const data = await res.json();
-      if (data.code) {
-        setGeneratedCode(data.code);
-        setEditPrompt(''); // Clear edit prompt after applying
+      if (!res.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      setGeneratedCode(''); // Start fresh for edit
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.chunk !== undefined) {
+                // Accumulate chunks
+                setGeneratedCode(prev => {
+                  const newCode = prev + data.chunk;
+                  return newCode;
+                });
+              }
+              if (data.done) {
+                // Final code is set
+                if (data.error) {
+                  alert(data.error || 'Something went wrong editing the app.');
+                  setLoading(false);
+                } else if (data.code) {
+                  setGeneratedCode(data.code);
+                  setEditPrompt(''); // Clear edit prompt after applying
+                  setLoading(false);
+                } else {
+                  setLoading(false);
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing SSE data:', e);
+            }
+          }
+        }
       }
     } catch (error) {
+      console.error('Edit error:', error);
+      setGeneratedCode(previousCode); // Restore previous code on error
       alert('Something went wrong editing the app.');
-    } finally {
       setLoading(false);
     }
   };
@@ -115,10 +276,13 @@ export default function CreateApp() {
       // Preserve original createdAt if editing existing app, otherwise use current time
       createdAt: originalCreatedAt || new Date().toISOString(),
       lastModified: new Date().toISOString(),
+      // Preserve imageUrl if editing existing app
+      imageUrl: preservedImageUrl,
     };
 
     try {
       saveApp(appData);
+      setSavedCode(generatedCode); // Update saved code after successful save
       router.push('/');
     } catch (error) {
       alert('Failed to save app. Please try again.');
@@ -128,34 +292,67 @@ export default function CreateApp() {
 
   if (isLoadingExistingApp) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+      <main className="flex min-h-screen items-center justify-center text-white" style={{ background: 'transparent' }}>
         <div className="text-center">
-          <div className="text-lg text-gray-600">Loading app for editing...</div>
+          <div className="text-lg text-gray-400">Loading app for editing...</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-gray-50 md:flex-row">
+    <main className="flex min-h-screen flex-col text-white md:flex-row" style={{ background: 'transparent' }}>
       {/* LEFT PANEL: Controls */}
       <div className="flex w-full flex-col justify-center p-8 md:w-1/2 md:p-12">
         <div className="mb-6">
-          <Link 
-            href="/" 
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
-          >
-            ← Back to Dashboard
-          </Link>
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900">
-            App<span className="text-blue-600">Gen</span>
+          {isEditingMode && hasUnsavedChanges ? (
+            <button
+              onClick={handleBackClick}
+              className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#181818] shadow-md hover:bg-[#282828] transition-colors text-[#3b82f6] hover:text-[#2563eb] mb-4"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+            </button>
+          ) : (
+            <Link 
+              href="/" 
+              className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#181818] shadow-md hover:bg-[#282828] transition-colors text-[#3b82f6] hover:text-[#2563eb] mb-4"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+            </Link>
+          )}
+          <h1 className="text-4xl font-bold tracking-tight text-white">
+            App<span className="text-[#3b82f6]">Gen</span>
           </h1>
         </div>
 
         {!isEditingMode ? (
           // INITIAL GENERATION MODE
           <>
-            <p className="mb-8 text-lg text-gray-600">
+            <p className="mb-8 text-lg text-gray-400">
               Describe a micro-tool you need, and we'll build and deploy it instantly.
             </p>
 
@@ -164,7 +361,7 @@ export default function CreateApp() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="e.g., A simple calorie tracker that lets me add food items and calculates total for the day."
-                className="text-black w-full rounded-xl border border-gray-200 p-4 text-lg shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="text-white bg-[#181818] w-full rounded-xl border border-gray-700 p-4 text-lg shadow-sm focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/20"
                 rows={4}
               />
 
@@ -174,7 +371,7 @@ export default function CreateApp() {
                 className={`w-full rounded-xl py-4 text-lg font-semibold text-white transition-all ${
                   loading
                     ? 'cursor-not-allowed bg-gray-400'
-                    : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
+                    : 'bg-[#3b82f6] hover:bg-[#2563eb] shadow-lg hover:shadow-xl'
                 }`}
               >
                 {loading ? 'Building your app...' : 'Generate App'}
@@ -183,13 +380,13 @@ export default function CreateApp() {
 
             {/* Suggestion Chips */}
             <div className="mt-8">
-              <p className="mb-2 text-sm font-medium text-gray-500">Try asking for:</p>
+              <p className="mb-2 text-sm font-medium text-gray-400">Try asking for:</p>
               <div className="flex flex-wrap gap-2">
                 {['Workout Tracker', 'Budget Planner', 'Pomodoro Timer'].map((item) => (
                   <button
                     key={item}
                     onClick={() => setPrompt(`I want a ${item}`)}
-                    className="rounded-full bg-white px-4 py-2 text-sm text-gray-700 shadow-sm border border-gray-100 hover:bg-gray-50"
+                    className="rounded-full bg-[#181818] px-4 py-2 text-sm text-white shadow-sm border border-gray-700 hover:bg-[#282828]"
                   >
                     {item}
                   </button>
@@ -200,7 +397,7 @@ export default function CreateApp() {
         ) : (
           // EDITING MODE
           <>
-            <p className="mb-8 text-lg text-gray-600">
+            <p className="mb-8 text-lg text-gray-400">
               {editAppId 
                 ? 'Edit and improve your app. Changes will update the existing version when you save.'
                 : 'Your app has been generated! You can now edit and improve it, or save it when you\'re satisfied.'}
@@ -211,7 +408,7 @@ export default function CreateApp() {
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
                 placeholder="e.g., Add a dark mode toggle, Change the color scheme to green, Add a reset button, etc."
-                className="text-black w-full rounded-xl border border-gray-200 p-4 text-lg shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="text-white bg-[#181818] w-full rounded-xl border border-gray-700 p-4 text-lg shadow-sm focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/20"
                 rows={4}
               />
 
@@ -222,7 +419,7 @@ export default function CreateApp() {
                   className={`flex-1 rounded-xl py-4 text-lg font-semibold text-white transition-all ${
                     loading || !editPrompt
                       ? 'cursor-not-allowed bg-gray-400'
-                      : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
+                      : 'bg-[#3b82f6] hover:bg-[#2563eb] shadow-lg hover:shadow-xl'
                   }`}
                 >
                   {loading ? 'Updating...' : 'Apply Edit'}
@@ -238,8 +435,8 @@ export default function CreateApp() {
               </div>
             </div>
 
-            <div className="mt-6 rounded-lg bg-blue-50 p-4 border border-blue-200">
-              <p className="text-sm text-blue-900">
+            <div className="mt-6 rounded-lg bg-[#181818] p-4 border border-gray-700">
+              <p className="text-sm text-gray-300">
                 <strong>Tip:</strong> You can make multiple edits to refine your app. Each edit builds upon the previous version.
               </p>
             </div>
@@ -247,12 +444,87 @@ export default function CreateApp() {
         )}
       </div>
 
-      {/* RIGHT PANEL: The Phone Preview */}
-      <div className="flex w-full items-center justify-center bg-gray-200 p-4 md:w-1/2 md:p-8">
-        <div className="relative h-[800px] w-full max-w-[400px]">
-          <AppSandbox htmlCode={generatedCode} />
-        </div>
+      {/* RIGHT PANEL: Streaming Code Display (Main Focus) */}
+      <div className="flex w-full flex-col items-center justify-center p-4 md:w-1/2 md:p-8" style={{ background: 'transparent' }}>
+        {!isEditingMode ? (
+          // SHOW STREAMING CODE DURING GENERATION (Main Focus)
+          <div className="w-full h-full max-h-[calc(100vh-4rem)] flex flex-col rounded-xl bg-[#181818] border border-gray-700 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-[#0f0f0f]">
+              <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${loading ? 'animate-pulse bg-[#3b82f6]' : generatedCode ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+                <span className="text-sm font-medium text-gray-300">
+                  {loading 
+                    ? (generatedCode ? '✨ Generating code live...' : '🚀 Starting generation...')
+                    : generatedCode 
+                    ? '✅ Code Generation Complete!'
+                    : 'Ready to generate'}
+                </span>
+              </div>
+              {generatedCode && (
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <span>{generatedCode.length.toLocaleString()} characters</span>
+                  {loading && <span className="animate-pulse">• Streaming...</span>}
+                </div>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto p-6 bg-[#0a0a0a]">
+              {generatedCode ? (
+                <pre className="font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  {generatedCode}
+                </pre>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  <div className="text-center">
+                    <div className="mb-4 text-6xl animate-pulse">⚡</div>
+                    <p className="text-base font-medium">Waiting for code to start streaming...</p>
+                    <p className="text-xs mt-2 text-gray-600">Your app will appear here as it's being generated</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            {generatedCode && !loading && (
+              <div className="p-4 border-t border-gray-700 bg-[#0f0f0f]">
+                <p className="text-xs text-gray-400 text-center">
+                  🎉 Code generation complete! Redirecting to preview...
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          // SHOW PREVIEW IN EDIT MODE
+          <div className="relative h-[800px] w-full max-w-[400px]">
+            <AppSandbox htmlCode={generatedCode} />
+          </div>
+        )}
       </div>
+
+      {/* Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-md rounded-2xl bg-[#181818] border border-gray-700 shadow-2xl p-6">
+            <h2 className="mb-4 text-xl font-bold text-white">
+              Unsaved Changes
+            </h2>
+            <p className="mb-6 text-gray-300">
+              You have unsaved changes. If you leave now, all unsaved changes will be discarded. Are you sure you want to proceed?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelLeave}
+                className="flex-1 rounded-xl bg-[#282828] px-4 py-3 font-semibold text-white transition-all hover:bg-[#383838] border border-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmLeave}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-3 font-semibold text-white transition-all hover:bg-red-700 shadow-lg"
+              >
+                Discard & Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

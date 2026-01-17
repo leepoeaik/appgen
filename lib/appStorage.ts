@@ -6,6 +6,7 @@ export interface AppData {
   initialPrompt: string;
   createdAt: string;
   lastModified: string;
+  imageUrl?: string; // Base64 or data URL for widget image
 }
 
 const STORAGE_KEY = 'appgen_apps';

@@ -2,14 +2,27 @@
 
 interface AppSandboxProps {
   htmlCode: string;
+  fullscreen?: boolean;
 }
 
-export default function AppSandbox({ htmlCode }: AppSandboxProps) {
+export default function AppSandbox({ htmlCode, fullscreen = false }: AppSandboxProps) {
   if (!htmlCode) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-gray-100 text-gray-400">
         <p>App Preview will appear here</p>
       </div>
+    );
+  }
+
+  if (fullscreen) {
+    return (
+      <iframe
+        srcDoc={htmlCode}
+        className="h-full w-full border-0"
+        title="Generated App"
+        // CRITICAL: This allows localStorage to work
+        sandbox="allow-scripts allow-forms allow-same-origin allow-modals"
+      />
     );
   }
 
