@@ -1,14 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AppSandbox from '@/components/AppSandbox';
 import Link from 'next/link';
-import { saveApp, generateAppId, extractAppNameFromPrompt } from '@/lib/appStorage';
+import { saveApp, generateAppId, extractAppNameFromPrompt, getAppById } from '@/lib/appStorage';
 import type { AppData } from '@/lib/appStorage';
 
 export default function CreateApp() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editAppId = searchParams.get('id');
+  
   const [prompt, setPrompt] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,6 +19,27 @@ export default function CreateApp() {
   const [initialPrompt, setInitialPrompt] = useState('');
   const [isEditingMode, setIsEditingMode] = useState(false);
   const [appId, setAppId] = useState<string | null>(null);
+  const [originalCreatedAt, setOriginalCreatedAt] = useState<string | null>(null);
+  const [isLoadingExistingApp, setIsLoadingExistingApp] = useState(false);
+
+  // Load existing app if editing
+  useEffect(() => {
+    if (editAppId) {
+      setIsLoadingExistingApp(true);
+      const existingApp = getAppById(editAppId);
+      if (existingApp) {
+        setAppId(existingApp.id);
+        setGeneratedCode(existingApp.code);
+        setInitialPrompt(existingApp.initialPrompt);
+        setOriginalCreatedAt(existingApp.createdAt);
+        setIsEditingMode(true); // Start in editing mode
+      } else {
+        // App not found, redirect to home
+        router.push('/');
+      }
+      setIsLoadingExistingApp(false);
+    }
+  }, [editAppId, router]);
 
   const handleGenerate = async () => {
     if (!prompt) return;
@@ -88,7 +112,8 @@ export default function CreateApp() {
       description: appDescription,
       code: generatedCode,
       initialPrompt: initialPrompt,
-      createdAt: new Date().toISOString(),
+      // Preserve original createdAt if editing existing app, otherwise use current time
+      createdAt: originalCreatedAt || new Date().toISOString(),
       lastModified: new Date().toISOString(),
     };
 
@@ -100,6 +125,16 @@ export default function CreateApp() {
       console.error('Save error:', error);
     }
   };
+
+  if (isLoadingExistingApp) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="text-lg text-gray-600">Loading app for editing...</div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-screen flex-col bg-gray-50 md:flex-row">
@@ -166,7 +201,9 @@ export default function CreateApp() {
           // EDITING MODE
           <>
             <p className="mb-8 text-lg text-gray-600">
-              Your app has been generated! You can now edit and improve it, or save it when you're satisfied.
+              {editAppId 
+                ? 'Edit and improve your app. Changes will update the existing version when you save.'
+                : 'Your app has been generated! You can now edit and improve it, or save it when you\'re satisfied.'}
             </p>
 
             <div className="space-y-4">

@@ -110,6 +110,15 @@ export default function Home() {
                     Open
                   </button>
                   <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/create?id=${app.id}`);
+                    }}
+                    className="rounded-md bg-purple-50 px-3 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+                  >
+                    Edit
+                  </button>
+                  <button 
                     onClick={(e) => handleDeleteApp(app.id, e)}
                     className="rounded-md bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
                   >
