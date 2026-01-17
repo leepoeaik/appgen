@@ -80,7 +80,7 @@ export async function POST(req: Request) {
 
     const stream = await openai.chat.completions.create({
       messages: messages,
-      model: 'gpt-4o', // Switch to 'gpt-4o' for better results if you have budget
+      model: 'gpt-4.1', // Switch to 'gpt-4o' for better results if you have budget
       temperature: 0.7, // Creative enough to infer features
       stream: true,
     });

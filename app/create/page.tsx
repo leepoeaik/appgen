@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppSandbox from '@/components/AppSandbox';
 import Link from 'next/link';
@@ -24,6 +24,9 @@ export default function CreateApp() {
   const [isLoadingExistingApp, setIsLoadingExistingApp] = useState(false);
   const [savedCode, setSavedCode] = useState<string>(''); // Track saved code to detect changes
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [appName, setAppName] = useState<string>(''); // App name for editing
+  const [isEditingName, setIsEditingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Load existing app if editing
   useEffect(() => {
@@ -35,6 +38,7 @@ export default function CreateApp() {
         setGeneratedCode(existingApp.code);
         setSavedCode(existingApp.code); // Store saved version
         setInitialPrompt(existingApp.initialPrompt);
+        setAppName(existingApp.name); // Load app name
         setOriginalCreatedAt(existingApp.createdAt);
         setPreservedImageUrl(existingApp.imageUrl); // Preserve image URL
         setIsEditingMode(true); // Start in editing mode
@@ -147,9 +151,10 @@ export default function CreateApp() {
                     ? prompt.substring(0, 100) + '...' 
                     : prompt;
 
+                  const generatedAppName = extractAppNameFromPrompt(prompt);
                   const appData: AppData = {
                     id: newId,
-                    name: appName,
+                    name: generatedAppName,
                     description: appDescription,
                     code: finalCode,
                     initialPrompt: prompt,
@@ -159,6 +164,7 @@ export default function CreateApp() {
 
                   try {
                     saveApp(appData);
+                    setAppName(generatedAppName); // Set app name
                     setSavedCode(finalCode); // Mark as saved
                     setLoading(false);
                     // Navigate to edit page with the app ID to show preview
@@ -262,14 +268,14 @@ export default function CreateApp() {
       return;
     }
 
-    const appName = extractAppNameFromPrompt(initialPrompt);
+    const finalAppName = appName.trim() || extractAppNameFromPrompt(initialPrompt);
     const appDescription = initialPrompt.length > 100 
       ? initialPrompt.substring(0, 100) + '...' 
       : initialPrompt;
 
     const appData: AppData = {
       id: appId,
-      name: appName,
+      name: finalAppName,
       description: appDescription,
       code: generatedCode,
       initialPrompt: initialPrompt,
@@ -282,11 +288,53 @@ export default function CreateApp() {
 
     try {
       saveApp(appData);
+      setAppName(finalAppName); // Update app name state
       setSavedCode(generatedCode); // Update saved code after successful save
       router.push('/');
     } catch (error) {
       alert('Failed to save app. Please try again.');
       console.error('Save error:', error);
+    }
+  };
+
+  // Handle name editing
+  const handleNameClick = () => {
+    setIsEditingName(true);
+    // Focus the input after state update
+    setTimeout(() => {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }, 0);
+  };
+
+  const handleNameBlur = () => {
+    setIsEditingName(false);
+    // Auto-save name if changed
+    if (appId && appName.trim()) {
+      const existingApp = getAppById(appId);
+      if (existingApp && existingApp.name !== appName.trim()) {
+        const appData: AppData = {
+          ...existingApp,
+          name: appName.trim(),
+          lastModified: new Date().toISOString(),
+        };
+        saveApp(appData);
+      }
+    }
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      // Restore original name on escape
+      if (appId) {
+        const existingApp = getAppById(appId);
+        if (existingApp) {
+          setAppName(existingApp.name);
+        }
+      }
+      setIsEditingName(false);
     }
   };
 
@@ -397,6 +445,52 @@ export default function CreateApp() {
         ) : (
           // EDITING MODE
           <>
+            {/* Editable App Name */}
+            <div className="mb-6 group">
+              {isEditingName ? (
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={appName}
+                  onChange={(e) => setAppName(e.target.value)}
+                  onBlur={handleNameBlur}
+                  onKeyDown={handleNameKeyDown}
+                  className="w-full bg-[#181818] border border-[#3b82f6] rounded-lg px-4 py-2 text-xl font-semibold text-white focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/20"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h2
+                    onClick={handleNameClick}
+                    className="text-2xl font-bold text-white cursor-text hover:text-[#3b82f6] transition-colors select-text"
+                    title="Click to edit name"
+                  >
+                    {appName || 'Untitled App'}
+                  </h2>
+                  <button
+                    onClick={handleNameClick}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[#282828]"
+                    title="Edit name"
+                  >
+                    <svg
+                      className="w-4 h-4 text-gray-400 hover:text-[#3b82f6]"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <p className="mb-8 text-lg text-gray-400">
               {editAppId 
                 ? 'Edit and improve your app. Changes will update the existing version when you save.'
