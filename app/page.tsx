@@ -203,7 +203,7 @@ export default function Home() {
 
                     {/* Image Upload Button - Hidden input */}
                     <input
-                      ref={(el) => (fileInputRefs.current[app.id] = el)}
+                      ref={(el) => { fileInputRefs.current[app.id] = el }}
                       type="file"
                       accept="image/*"
                       className="hidden"

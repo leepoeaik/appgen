@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppSandbox from '@/components/AppSandbox';
 import Link from 'next/link';
 import { saveApp, generateAppId, extractAppNameFromPrompt, getAppById } from '@/lib/appStorage';
 import type { AppData } from '@/lib/appStorage';
 
-export default function CreateApp() {
+function CreateAppContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editAppId = searchParams.get('id');
@@ -620,5 +620,19 @@ export default function CreateApp() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function CreateApp() {
+  return (
+    <Suspense fallback={
+      <main className="flex min-h-screen items-center justify-center text-white" style={{ background: 'transparent' }}>
+        <div className="text-center">
+          <div className="text-lg text-gray-400">Loading...</div>
+        </div>
+      </main>
+    }>
+      <CreateAppContent />
+    </Suspense>
   );
 }
