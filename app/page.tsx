@@ -109,18 +109,18 @@ export default function Home() {
     <main className="min-h-screen text-white" style={{ background: 'transparent' }}>
       <div className="mx-auto max-w-7xl px-6 py-8 sm:px-8 lg:px-10">
         {/* Header */}
-        <div className="mb-10 flex items-center justify-between">
+        <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-5xl font-bold tracking-tight text-white mb-2">
+            <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-white mb-2">
               App<span className="text-[#3b82f6]">Gen</span>
             </h1>
-            <p className="text-gray-400 text-lg">
+            <p className="text-gray-400 text-base sm:text-lg">
               Your micro-tools dashboard
             </p>
           </div>
           <Link
             href="/create"
-            className="rounded-full bg-[#3b82f6] px-8 py-3 text-base font-bold text-white transition-all hover:bg-[#2563eb] hover:scale-105 shadow-lg"
+            className="rounded-full bg-[#3b82f6] px-6 py-2.5 sm:px-8 sm:py-3 text-sm sm:text-base font-bold text-white transition-all hover:bg-[#2563eb] hover:scale-105 shadow-lg w-full sm:w-auto text-center"
           >
             Create New
           </Link>

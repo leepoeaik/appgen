@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+// Check if API key is configured
+if (!process.env.OPENAI_API_KEY) {
+  console.error('OPENAI_API_KEY is not set in environment variables');
+}
 
 // Read the system prompt from the markdown file
 function getSystemPrompt(): string {
@@ -13,47 +18,17 @@ function getSystemPrompt(): string {
   return readFileSync(filePath, 'utf-8');
 }
 
-// Get the next sample number by counting existing files
-function getNextSampleNumber(): number {
-  const sampleDir = join(process.cwd(), 'sample');
-  
-  // Create sample directory if it doesn't exist
-  if (!existsSync(sampleDir)) {
-    mkdirSync(sampleDir, { recursive: true });
-    return 1;
-  }
-  
-  // Read existing files and find the highest number
-  const files = readdirSync(sampleDir);
-  const sampleFiles = files.filter(file => file.match(/^sample\d+\.html$/));
-  
-  if (sampleFiles.length === 0) {
-    return 1;
-  }
-  
-  // Extract numbers from filenames and find the max
-  const numbers = sampleFiles.map(file => {
-    const match = file.match(/^sample(\d+)\.html$/);
-    return match ? parseInt(match[1], 10) : 0;
-  });
-  
-  return Math.max(...numbers) + 1;
-}
-
-// Save the generated HTML to a file
-function saveSample(htmlCode: string): string {
-  const sampleDir = join(process.cwd(), 'sample');
-  const sampleNumber = getNextSampleNumber();
-  const fileName = `sample${sampleNumber}.html`;
-  const filePath = join(sampleDir, fileName);
-  
-  writeFileSync(filePath, htmlCode, 'utf-8');
-  
-  return fileName;
-}
+// Note: File saving removed for Vercel compatibility (serverless functions have read-only filesystem)
+// The generated code is saved in localStorage on the client side instead
 
 export async function POST(req: Request) {
   try {
+    // Check if API key is configured
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY is not set');
+      return NextResponse.json({ error: 'OpenAI API key is not configured' }, { status: 500 });
+    }
+
     const { prompt, existingCode, isEdit } = await req.json();
 
     if (!prompt) return NextResponse.json({ error: 'Prompt required' }, { status: 400 });
@@ -104,12 +79,11 @@ export async function POST(req: Request) {
           // CLEANUP: Remove markdown backticks if the AI adds them
           let htmlCode = fullContent.replace(/```html/g, '').replace(/```/g, '');
 
-          // Save the generated HTML to a file
-          const fileName = saveSample(htmlCode);
-          console.log(`Saved generated app to: sample/${fileName}`);
+          // Note: File saving removed for Vercel compatibility
+          // The code is saved in localStorage on the client side instead
 
           // Send final message with complete code
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: '', done: true, code: htmlCode, fileName })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: '', done: true, code: htmlCode })}\n\n`));
           controller.close();
         } catch (streamError) {
           console.error('Streaming error:', streamError);
